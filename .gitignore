@@ -1,0 +1,52 @@
+# Image files
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.tiff
+*.tif
+*.webp
+*.ico
+
+# Dataset folders
+asl_dataset/
+asl_dataset_augmented/
+asl_dataset_remaining/
+HG14-Hand Gesture/
+
+# JSON data files
+*.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Models
+*.pkl
+*.h5
+*.model
+*.weights
