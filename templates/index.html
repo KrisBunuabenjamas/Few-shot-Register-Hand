@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASL Hand Gesture Recognition</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1d27;
+      padding: 14px 24px;
+      border-bottom: 1px solid #2a2d3a;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; color: #fff; }
+    .badge {
+      font-size: 0.7rem;
+      background: #3b82f6;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      height: calc(100vh - 53px);
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      background: #1a1d27;
+      border-right: 1px solid #2a2d3a;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: #22263a;
+      border: 1px solid #2e3250;
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .card h2 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #8891b4;
+      margin-bottom: 10px;
+    }
+
+    label { font-size: 0.85rem; color: #c0c8e8; display: block; margin-bottom: 4px; }
+    input[type=text], select, input[type=number] {
+      width: 100%;
+      background: #13152080;
+      border: 1px solid #3a3f60;
+      color: #e0e0f0;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    input[type=text]:focus, select:focus, input[type=number]:focus {
+      border-color: #3b82f6;
+    }
+
+    .row { display: flex; gap: 8px; margin-top: 8px; }
+    .row > * { flex: 1; }
+
+    button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background .15s;
+      width: 100%;
+    }
+    button:hover { background: #2563eb; }
+    button.secondary {
+      background: #2e3250;
+      color: #c0c8e8;
+    }
+    button.secondary:hover { background: #3a3f60; }
+    button.danger { background: #ef4444; }
+    button.danger:hover { background: #dc2626; }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78rem;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: #1e2236;
+      border: 1px solid #3a3f60;
+      color: #8891b4;
+    }
+    .status-chip.ok { border-color: #22c55e; color: #22c55e; background: #052e16; }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: #8891b4;
+      margin-top: 4px;
+    }
+    .info-row span:last-child { color: #c0c8e8; }
+
+    /* ── Main ── */
+    .main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .cam-area {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #080a10;
+      overflow: hidden;
+    }
+    #camStream {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .cam-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: #3a3f60;
+    }
+    .cam-placeholder svg { width: 64px; height: 64px; }
+    .cam-placeholder p { font-size: 0.9rem; }
+
+    .pred-overlay {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #000000cc;
+      border: 1px solid #3b82f680;
+      border-radius: 12px;
+      padding: 12px 28px;
+      text-align: center;
+      display: none;
+    }
+    .pred-class {
+      font-size: 3rem;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+    }
+    .pred-conf {
+      font-size: 0.78rem;
+      color: #8891b4;
+      margin-top: 4px;
+    }
+    .votes-row {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 6px;
+    }
+    .vote-chip {
+      font-size: 0.7rem;
+      background: #3b82f620;
+      border: 1px solid #3b82f650;
+      color: #93c5fd;
+      padding: 1px 8px;
+      border-radius: 999px;
+    }
+
+    .bottom-bar {
+      background: #1a1d27;
+      border-top: 1px solid #2a2d3a;
+      padding: 8px 16px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    #camBtn { max-width: 160px; }
+    #statusTxt { font-size: 0.8rem; color: #8891b4; }
+
+    /* ── Stats table ── */
+    .stats-wrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th { text-align: left; color: #8891b4; font-weight: 500; padding: 4px 8px; border-bottom: 1px solid #2e3250; }
+    td { padding: 3px 8px; color: #c0c8e8; }
+    tr:hover td { background: #ffffff08; }
+    .acc-bar-wrap { width: 80px; background: #1e2236; border-radius: 99px; height: 6px; display: inline-block; vertical-align: middle; }
+    .acc-bar { height: 100%; border-radius: 99px; background: #3b82f6; }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e2236;
+      border: 1px solid #3a3f60;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      color: #e0e0f0;
+      z-index: 999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all .25s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { border-color: #ef4444; color: #fca5a5; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ASL Hand Gesture Recognition</h1>
+  <span class="badge">KNN · MediaPipe</span>
+</header>
+
+<div class="layout">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+
+    <!-- Training data -->
+    <div class="card">
+      <h2>Training Data</h2>
+      <label>Load from file path</label>
+      <input type="text" id="trainingPath" placeholder="C:\path\to\training.json" />
+      <button style="margin-top:8px" onclick="loadByPath()">Load JSON</button>
+
+      <div style="margin:10px 0;text-align:center;color:#3a3f60;font-size:.8rem">— or upload —</div>
+
+      <label for="fileUpload" style="cursor:pointer">
+        <div style="border:1px dashed #3a3f60;border-radius:6px;padding:10px;text-align:center;font-size:.82rem;color:#8891b4;transition:.15s"
+             id="dropZone">
+          Click to upload JSON
+        </div>
+      </label>
+      <input type="file" id="fileUpload" accept=".json" style="display:none" onchange="uploadFile(this)" />
+
+      <div id="trainingStatus" style="margin-top:10px">
+        <span class="status-chip" id="trainingChip"><span class="dot"></span>Not loaded</span>
+      </div>
+      <div class="info-row" id="trainingInfo" style="display:none">
+        <span>Samples</span><span id="samplesCount">—</span>
+      </div>
+    </div>
+
+    <!-- KNN settings -->
+    <div class="card">
+      <h2>KNN Settings</h2>
+      <div class="row">
+        <div>
+          <label>K</label>
+          <input type="number" id="kVal" value="3" min="1" max="20" />
+        </div>
+        <div>
+          <label>Metric</label>
+          <select id="metricVal">
+            <option value="euclidean">Euclidean</option>
+            <option value="cosine">Cosine</option>
+            <option value="manhattan">Manhattan</option>
+            <option value="mse">MSE</option>
+          </select>
+        </div>
+      </div>
+      <button style="margin-top:8px" onclick="applySettings()">Apply</button>
+    </div>
+
+    <!-- Class stats -->
+    <div class="card" style="flex:1;min-height:0">
+      <h2>Evaluation Stats <button class="secondary" style="width:auto;padding:2px 10px;font-size:.7rem" onclick="loadStats()">Load</button></h2>
+      <div id="statsArea" style="color:#8891b4;font-size:.82rem;margin-top:6px">
+        Click Load to show evaluation_results.json stats.
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="main">
+    <div class="cam-area" id="camArea">
+      <div class="cam-placeholder" id="camPlaceholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        <p>Click <strong>Start Camera</strong> to begin</p>
+      </div>
+      <img id="camStream" src="" alt="Camera feed" />
+      <div class="pred-overlay" id="predOverlay">
+        <div class="pred-class" id="predClass">—</div>
+        <div class="pred-conf" id="predConf"></div>
+        <div class="votes-row" id="predVotes"></div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <button id="camBtn" onclick="toggleCamera()">Start Camera</button>
+      <span id="statusTxt">Camera off</span>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let camOn = false;
+let pollTimer = null;
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' error' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ── Training ──────────────────────────────────────────────────────────────────
+async function loadByPath() {
+  const path = document.getElementById('trainingPath').value.trim();
+  if (!path) return showToast('Enter a file path', true);
+  const r = await fetch('/load_training', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    setTrainingLoaded(d.samples);
+    showToast(`Loaded ${d.samples} samples`);
+  } else {
+    showToast(d.error, true);
+  }
+}
+
+async function uploadFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await fetch('/upload_training', {method: 'POST', body: fd});
+  const d = await r.json();
+  if (d.ok) {
+    setTrainingLoaded(d.samples);
+    showToast(`Loaded ${d.samples} samples from ${f.name}`);
+  } else {
+    showToast(d.error, true);
+  }
+}
+
+function setTrainingLoaded(n) {
+  const chip = document.getElementById('trainingChip');
+  chip.className = 'status-chip ok';
+  chip.innerHTML = '<span class="dot"></span>Loaded';
+  document.getElementById('trainingInfo').style.display = 'flex';
+  document.getElementById('samplesCount').textContent = n;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+async function applySettings() {
+  const k = parseInt(document.getElementById('kVal').value);
+  const metric = document.getElementById('metricVal').value;
+  await fetch('/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({k, metric}),
+  });
+  showToast(`K=${k}, metric=${metric}`);
+}
+
+// ── Camera ────────────────────────────────────────────────────────────────────
+function toggleCamera() {
+  if (camOn) stopCamera();
+  else startCamera();
+}
+
+function startCamera() {
+  const stream = document.getElementById('camStream');
+  const btn = document.getElementById('camBtn');
+  const placeholder = document.getElementById('camPlaceholder');
+
+  stream.src = '/video_feed?' + Date.now();
+  stream.style.display = 'block';
+  placeholder.style.display = 'none';
+  document.getElementById('predOverlay').style.display = 'block';
+
+  btn.textContent = 'Stop Camera';
+  btn.className = 'danger';
+  document.getElementById('statusTxt').textContent = 'Camera on';
+  camOn = true;
+
+  pollTimer = setInterval(pollPrediction, 300);
+}
+
+function stopCamera() {
+  const stream = document.getElementById('camStream');
+  const btn = document.getElementById('camBtn');
+
+  fetch('/stop_camera', {method: 'POST'});
+  stream.src = '';
+  stream.style.display = 'none';
+  document.getElementById('camPlaceholder').style.display = 'flex';
+  document.getElementById('predOverlay').style.display = 'none';
+
+  btn.textContent = 'Start Camera';
+  btn.className = '';
+  document.getElementById('statusTxt').textContent = 'Camera off';
+  camOn = false;
+
+  clearInterval(pollTimer);
+}
+
+// ── Prediction polling ────────────────────────────────────────────────────────
+async function pollPrediction() {
+  try {
+    const r = await fetch('/prediction');
+    const d = await r.json();
+    if (d.class) {
+      document.getElementById('predClass').textContent = d.class;
+      document.getElementById('predConf').textContent = `confidence: ${d.confidence.toFixed(2)}`;
+      const votesEl = document.getElementById('predVotes');
+      votesEl.innerHTML = d.votes.map(v => `<span class="vote-chip">${v}</span>`).join('');
+    } else {
+      document.getElementById('predClass').textContent = '—';
+      document.getElementById('predConf').textContent = 'No hand detected';
+      document.getElementById('predVotes').innerHTML = '';
+    }
+  } catch (_) {}
+}
+
+// ── Eval stats ────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const r = await fetch('/class_stats');
+  const d = await r.json();
+  const el = document.getElementById('statsArea');
+
+  if (!d.ok) {
+    el.textContent = d.error;
+    return;
+  }
+
+  const data = d.data;
+  const overall = (data.accuracy_all * 100).toFixed(1);
+  const cls_stats = data.class_statistics || {};
+
+  let html = `<div style="margin-bottom:8px;color:#c0c8e8">Overall accuracy: <strong style="color:#3b82f6">${overall}%</strong>
+    &nbsp;·&nbsp; ${data.correct}/${data.total} samples</div>`;
+
+  if (Object.keys(cls_stats).length > 0) {
+    html += `<div class="stats-wrap"><table>
+      <thead><tr><th>Class</th><th>Total</th><th>Acc</th><th></th></tr></thead><tbody>`;
+    for (const [cls, st] of Object.entries(cls_stats).sort()) {
+      const acc = st.total > 0 ? st.correct / st.total : 0;
+      const pct = (acc * 100).toFixed(0);
+      html += `<tr>
+        <td><strong>${cls}</strong></td>
+        <td>${st.total}</td>
+        <td>${pct}%</td>
+        <td><span class="acc-bar-wrap"><span class="acc-bar" style="width:${pct}%"></span></span></td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  const r = await fetch('/status');
+  const d = await r.json();
+  if (d.training_loaded) {
+    setTrainingLoaded(d.training_samples);
+    if (d.training_path) document.getElementById('trainingPath').value = d.training_path;
+  }
+  document.getElementById('kVal').value = d.k;
+  document.getElementById('metricVal').value = d.metric;
+})();
+</script>
+</body>
+</html>
