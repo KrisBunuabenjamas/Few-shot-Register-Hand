@@ -260,5 +260,20 @@ def class_stats():
         return jsonify({"ok": False, "error": str(e)})
 
 
+def _autoload_training():
+    default = os.path.join(os.path.dirname(__file__), "asl_training.json")
+    if os.path.isfile(default):
+        try:
+            with open(default) as f:
+                td = json.load(f)
+            with state_lock:
+                state["training_data"] = td
+                state["training_path"] = default
+            print(f"Auto-loaded {len(td['samples'])} samples from {default}")
+        except Exception as e:
+            print(f"Could not auto-load training data: {e}")
+
+
 if __name__ == "__main__":
+    _autoload_training()
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

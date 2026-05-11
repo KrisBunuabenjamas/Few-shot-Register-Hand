@@ -11,60 +11,58 @@ import json
 import argparse
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 import numpy as np
 import math
 
 
 def get_pairwise_distances(hand_landmarks):
-    """
-    Calculate pairwise distances between all 21 hand landmarks.
-    Returns a flattened array of 21x21 = 441 normalized distances.
-    """
+    """Legacy wrapper: accepts old-style hand_landmarks with .landmark list."""
     lm = hand_landmarks.landmark
-    
-    # Calculate hand size for normalization (wrist to middle finger tip)
+    return _get_pairwise_distances_from_landmarks(lm)
+
+
+def _get_pairwise_distances_from_landmarks(lm):
+    """lm: list of landmark objects with .x and .y attributes (Tasks API or legacy)."""
     hand_size = math.sqrt((lm[12].x - lm[0].x)**2 + (lm[12].y - lm[0].y)**2) + 1e-6
-    
-    # Calculate distance from each landmark to every other landmark
     pairwise_dists = []
     for i in range(21):
         for j in range(21):
             dx = lm[i].x - lm[j].x
             dy = lm[i].y - lm[j].y
-            dist = math.sqrt(dx*dx + dy*dy) / hand_size
-            pairwise_dists.append(dist)
-    
+            pairwise_dists.append(math.sqrt(dx*dx + dy*dy) / hand_size)
     features = np.array(pairwise_dists)
-    
-    # Apply L2 normalization
     norm = np.linalg.norm(features)
-    if norm > 0:
-        features = features / norm
-    
-    return features
+    return features / norm if norm > 0 else features
 
 
 def register_dataset_pairwise(dataset_dir, out_path, max_per_class=0, min_detection_confidence=0.5, min_score=0.7, prioritize_right=True):
     if not os.path.isdir(dataset_dir):
         raise FileNotFoundError(dataset_dir)
 
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(max_num_hands=2,
-                           min_detection_confidence=min_detection_confidence,
-                           min_tracking_confidence=0.5)
+    _model_path = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+    options = mp_vision.HandLandmarkerOptions(
+        base_options=mp_python.BaseOptions(model_asset_path=_model_path),
+        running_mode=mp_vision.RunningMode.IMAGE,
+        num_hands=2,
+        min_hand_detection_confidence=min_detection_confidence,
+        min_hand_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    detector = mp_vision.HandLandmarker.create_from_options(options)
 
     all_samples = []
     stats = {}
 
-    # Walk through all subdirectories (each is a class)
-    class_dirs = sorted([d for d in os.listdir(dataset_dir) 
-                        if os.path.isdir(os.path.join(dataset_dir, d))])
+    class_dirs = sorted([d for d in os.listdir(dataset_dir)
+                         if os.path.isdir(os.path.join(dataset_dir, d))])
 
     for class_name in class_dirs:
         class_path = os.path.join(dataset_dir, class_name)
-        image_files = sorted([f for f in os.listdir(class_path) 
-                            if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        
+        image_files = sorted([f for f in os.listdir(class_path)
+                               if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+
         if max_per_class > 0:
             image_files = image_files[:max_per_class]
 
@@ -78,42 +76,41 @@ def register_dataset_pairwise(dataset_dir, out_path, max_per_class=0, min_detect
                 continue
 
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = hands.process(rgb)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = detector.detect(mp_image)
 
-            if not results.multi_hand_landmarks:
+            if not result.hand_landmarks:
                 continue
 
             # Select best hand (prioritize right hand if multiple detected)
             best_idx = 0
-            if len(results.multi_hand_landmarks) > 1 and prioritize_right:
-                if results.multi_handedness[1].classification[0].label == 'Right':
-                    best_idx = 1
+            if len(result.handedness) > 1 and prioritize_right:
+                for idx, handedness in enumerate(result.handedness):
+                    if handedness[0].category_name == 'Right':
+                        best_idx = idx
+                        break
 
-            hand_lm = results.multi_hand_landmarks[best_idx]
-            hand_label = results.multi_handedness[best_idx].classification[0].label
-            hand_score = results.multi_handedness[best_idx].classification[0].score
+            hand_lm = result.hand_landmarks[best_idx]
+            hand_label = result.handedness[best_idx][0].category_name
+            hand_score = result.handedness[best_idx][0].score
 
             if hand_score < min_score:
                 continue
 
-            # Extract pairwise distance features
-            features = get_pairwise_distances(hand_lm)
+            features = _get_pairwise_distances_from_landmarks(hand_lm)
 
             sample = {
                 'class': class_name,
                 'features': features.tolist(),
                 'side': hand_label,
-                'score': hand_score
+                'score': hand_score,
             }
             all_samples.append(sample)
             detected_count += 1
 
-        stats[class_name] = {
-            'total': total_count,
-            'detected': detected_count
-        }
+        stats[class_name] = {'total': total_count, 'detected': detected_count}
 
-    hands.close()
+    detector.close()
 
     # Write to JSON
     output_data = {
@@ -149,7 +146,7 @@ def main():
         prioritize_right=args.prioritize_right
     )
 
-    print(f"✅ Registered {len(output_data['samples'])} training samples with pairwise distances")
+    print(f"Registered {len(output_data['samples'])} training samples with pairwise distances")
     print(f"   Feature type: 21x21 pairwise distances (441 features)")
     print()
     print("Stats by class:")
