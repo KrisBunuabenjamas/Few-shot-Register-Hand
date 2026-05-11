@@ -236,6 +236,21 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.error { border-color: #ef4444; color: #fca5a5; }
+
+    button.success { background: #22c55e; }
+    button.success:hover { background: #16a34a; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .capture-count {
+      display: inline-block;
+      background: #3b82f620;
+      border: 1px solid #3b82f650;
+      color: #93c5fd;
+      border-radius: 999px;
+      padding: 1px 10px;
+      font-size: 0.78rem;
+      margin-left: 6px;
+    }
+    #registerStatus { margin-top: 8px; font-size: .8rem; color: #8891b4; min-height: 1.2em; }
   </style>
 </head>
 <body>
@@ -293,6 +308,24 @@
         </div>
       </div>
       <button style="margin-top:8px" onclick="applySettings()">Apply</button>
+    </div>
+
+    <!-- Register Gesture -->
+    <div class="card">
+      <h2>Register New Gesture</h2>
+      <label>Gesture class name</label>
+      <input type="text" id="gestureClassName" placeholder="e.g. thumbs_up" />
+      <div class="row">
+        <button onclick="captureGestureSample()" id="captureBtn">
+          Capture <span class="capture-count" id="captureCount">0</span>
+        </button>
+        <button class="secondary" onclick="clearPending()">Clear</button>
+      </div>
+      <div class="row">
+        <button class="success" id="commitBtn" onclick="commitGesture()" disabled>Add Gesture</button>
+        <button class="secondary" onclick="saveTraining()">Save to disk</button>
+      </div>
+      <div id="registerStatus"></div>
     </div>
 
     <!-- Class stats -->
@@ -454,6 +487,64 @@ async function pollPrediction() {
       document.getElementById('predVotes').innerHTML = '';
     }
   } catch (_) {}
+}
+
+// ── Register Gesture ──────────────────────────────────────────────────────────
+function updateCaptureUI(count) {
+  document.getElementById('captureCount').textContent = count;
+  document.getElementById('commitBtn').disabled = count < 1;
+}
+
+async function captureGestureSample() {
+  const className = document.getElementById('gestureClassName').value.trim();
+  if (!className) return showToast('Enter a gesture class name first', true);
+  if (!camOn) return showToast('Start the camera first', true);
+  const r = await fetch('/capture_sample', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({class_name: className}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    updateCaptureUI(d.count);
+    document.getElementById('registerStatus').textContent =
+      `${d.count} sample(s) captured for "${className}"`;
+  } else {
+    showToast(d.error, true);
+  }
+}
+
+async function commitGesture() {
+  const className = document.getElementById('gestureClassName').value.trim();
+  if (!className) return showToast('Enter a gesture class name first', true);
+  const r = await fetch('/commit_gesture', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({class_name: className}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    updateCaptureUI(0);
+    document.getElementById('samplesCount').textContent = d.total_samples;
+    document.getElementById('registerStatus').textContent =
+      `Added ${d.added} sample(s) — total ${d.total_samples} in model.`;
+    showToast(`"${className}" registered with ${d.added} samples`);
+  } else {
+    showToast(d.error, true);
+  }
+}
+
+async function clearPending() {
+  await fetch('/clear_pending', {method: 'POST'});
+  updateCaptureUI(0);
+  document.getElementById('registerStatus').textContent = 'Pending samples cleared.';
+}
+
+async function saveTraining() {
+  const r = await fetch('/save_training', {method: 'POST'});
+  const d = await r.json();
+  if (d.ok) showToast(`Saved to ${d.path}`);
+  else showToast(d.error, true);
 }
 
 // ── Eval stats ────────────────────────────────────────────────────────────────

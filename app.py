@@ -6,6 +6,7 @@ import json
 import math
 import threading
 import time
+import types
 from collections import Counter
 from io import BytesIO
 
@@ -26,6 +27,8 @@ state = {
     "latest_prediction": {"class": None, "confidence": 0.0, "votes": []},
     "k": 3,
     "metric": "euclidean",
+    "latest_landmarks": None,
+    "pending_samples": [],
 }
 state_lock = threading.Lock()
 
@@ -124,6 +127,8 @@ def generate_frames():
 
             if detection.hand_landmarks:
                 lm = detection.hand_landmarks[0]
+                with state_lock:
+                    state["latest_landmarks"] = [(p.x, p.y, p.z) for p in lm]
                 h, w = frame.shape[:2]
 
                 # Draw landmarks
@@ -149,6 +154,10 @@ def generate_frames():
                         (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5,
                         (0, 255, 0), 3, cv2.LINE_AA,
                     )
+
+            if not detection.hand_landmarks:
+                with state_lock:
+                    state["latest_landmarks"] = None
 
             with state_lock:
                 state["latest_prediction"] = {
@@ -258,6 +267,69 @@ def class_stats():
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/capture_sample", methods=["POST"])
+def capture_sample():
+    data = request.get_json()
+    class_name = (data.get("class_name") or "").strip()
+    if not class_name:
+        return jsonify({"ok": False, "error": "class_name required"}), 400
+    with state_lock:
+        lm_raw = state["latest_landmarks"]
+    if lm_raw is None:
+        return jsonify({"ok": False, "error": "No hand detected"}), 400
+    lm = [types.SimpleNamespace(x=t[0], y=t[1]) for t in lm_raw]
+    features = get_pairwise_distances(lm)
+    sample = {"class": class_name, "features": features.tolist(), "side": "Unknown", "score": 1.0}
+    with state_lock:
+        state["pending_samples"].append(sample)
+        count = len(state["pending_samples"])
+    return jsonify({"ok": True, "count": count})
+
+
+@app.route("/commit_gesture", methods=["POST"])
+def commit_gesture():
+    data = request.get_json()
+    class_name = (data.get("class_name") or "").strip()
+    if not class_name:
+        return jsonify({"ok": False, "error": "class_name required"}), 400
+    with state_lock:
+        if state["training_data"] is None:
+            return jsonify({"ok": False, "error": "No training data loaded"}), 400
+        added = [s for s in state["pending_samples"] if s["class"] == class_name]
+        state["training_data"]["samples"].extend(added)
+        stats = state["training_data"].setdefault("stats", {})
+        if class_name in stats:
+            stats[class_name]["total"] += len(added)
+            stats[class_name]["detected"] = stats[class_name].get("detected", 0) + len(added)
+        else:
+            stats[class_name] = {"total": len(added), "detected": len(added)}
+        state["pending_samples"] = []
+        total = len(state["training_data"]["samples"])
+    return jsonify({"ok": True, "added": len(added), "total_samples": total})
+
+
+@app.route("/save_training", methods=["POST"])
+def save_training():
+    with state_lock:
+        td = state["training_data"]
+        path = state["training_path"]
+    if td is None or not path:
+        return jsonify({"ok": False, "error": "No training data loaded"}), 400
+    try:
+        with open(path, "w") as f:
+            json.dump(td, f, indent=2)
+        return jsonify({"ok": True, "path": path})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/clear_pending", methods=["POST"])
+def clear_pending():
+    with state_lock:
+        state["pending_samples"] = []
+    return jsonify({"ok": True})
 
 
 def _autoload_training():
