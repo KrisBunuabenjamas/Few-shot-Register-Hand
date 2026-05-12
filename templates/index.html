@@ -269,7 +269,7 @@
       <h2>Training Data</h2>
       <label>Load from file path</label>
       <input type="text" id="trainingPath" placeholder="C:\path\to\training.json" />
-      <button style="margin-top:8px" onclick="loadByPath()">Load JSON</button>
+      <button type="button" style="margin-top:8px" onclick="loadByPath()">Load JSON</button>
 
       <div style="margin:10px 0;text-align:center;color:#3a3f60;font-size:.8rem">— or upload —</div>
 
@@ -307,7 +307,7 @@
           </select>
         </div>
       </div>
-      <button style="margin-top:8px" onclick="applySettings()">Apply</button>
+      <button type="button" style="margin-top:8px" onclick="applySettings()">Apply</button>
     </div>
 
     <!-- Register Gesture -->
@@ -315,22 +315,44 @@
       <h2>Register New Gesture</h2>
       <label>Gesture class name</label>
       <input type="text" id="gestureClassName" placeholder="e.g. thumbs_up" />
+      <label style="margin-top:8px">Capture delay</label>
+      <select id="captureDelay" onchange="updateRecordAvailability()">
+        <option value="0">No delay</option>
+        <option value="5">5 seconds</option>
+        <option value="10">10 seconds</option>
+      </select>
+      <label style="margin-top:8px">Auto samples</label>
+      <select id="autoSampleCount">
+        <option value="10">10 samples</option>
+        <option value="20">20 samples</option>
+        <option value="30">30 samples</option>
+      </select>
       <div class="row">
-        <button onclick="captureGestureSample()" id="captureBtn">
+        <button type="button" onclick="captureGestureSample()" id="captureBtn">
           Capture <span class="capture-count" id="captureCount">0</span>
         </button>
-        <button class="secondary" onclick="clearPending()">Clear</button>
+        <button type="button" class="secondary" onclick="clearPending()">Clear</button>
       </div>
+      <button type="button" style="margin-top:8px" onclick="recordGestureSamples()" id="recordBtn">
+        Record Samples
+      </button>
       <div class="row">
-        <button class="success" id="commitBtn" onclick="commitGesture()" disabled>Add Gesture</button>
-        <button class="secondary" onclick="saveTraining()">Save to disk</button>
+        <button type="button" class="success" id="commitBtn" onclick="commitGesture()" disabled>Add Gesture</button>
+        <button type="button" class="secondary" onclick="saveTraining()">Save to disk</button>
+      </div>
+      <label style="margin-top:8px">Saved gesture classes</label>
+      <div class="row">
+        <select id="deleteClassName">
+          <option value="">No classes loaded</option>
+        </select>
+        <button type="button" class="danger" onclick="deleteGestureClass()">Delete</button>
       </div>
       <div id="registerStatus"></div>
     </div>
 
     <!-- Class stats -->
     <div class="card" style="flex:1;min-height:0">
-      <h2>Evaluation Stats <button class="secondary" style="width:auto;padding:2px 10px;font-size:.7rem" onclick="loadStats()">Load</button></h2>
+      <h2>Evaluation Stats <button type="button" class="secondary" style="width:auto;padding:2px 10px;font-size:.7rem" onclick="loadStats()">Load</button></h2>
       <div id="statsArea" style="color:#8891b4;font-size:.82rem;margin-top:6px">
         Click Load to show evaluation_results.json stats.
       </div>
@@ -355,7 +377,7 @@
     </div>
 
     <div class="bottom-bar">
-      <button id="camBtn" onclick="toggleCamera()">Start Camera</button>
+      <button type="button" id="camBtn" onclick="toggleCamera()">Start Camera</button>
       <span id="statusTxt">Camera off</span>
     </div>
   </div>
@@ -366,6 +388,8 @@
 <script>
 let camOn = false;
 let pollTimer = null;
+let currentClasses = {};
+const formStateFields = ['trainingPath', 'gestureClassName', 'captureDelay', 'autoSampleCount', 'kVal', 'metricVal'];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function showToast(msg, isErr = false) {
@@ -388,6 +412,9 @@ async function loadByPath() {
   const d = await r.json();
   if (d.ok) {
     setTrainingLoaded(d.samples);
+    setClassOptions(d.classes);
+    if (d.path) document.getElementById('trainingPath').value = d.path;
+    saveFormState();
     showToast(`Loaded ${d.samples} samples`);
   } else {
     showToast(d.error, true);
@@ -403,6 +430,9 @@ async function uploadFile(input) {
   const d = await r.json();
   if (d.ok) {
     setTrainingLoaded(d.samples);
+    setClassOptions(d.classes);
+    if (d.path) document.getElementById('trainingPath').value = d.path;
+    saveFormState();
     showToast(`Loaded ${d.samples} samples from ${f.name}`);
   } else {
     showToast(d.error, true);
@@ -426,6 +456,7 @@ async function applySettings() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({k, metric}),
   });
+  saveFormState();
   showToast(`K=${k}, metric=${metric}`);
 }
 
@@ -478,12 +509,14 @@ async function pollPrediction() {
     const d = await r.json();
     if (d.class) {
       document.getElementById('predClass').textContent = d.class;
-      document.getElementById('predConf').textContent = `confidence: ${d.confidence.toFixed(2)}`;
+      document.getElementById('predConf').textContent =
+        `${d.hand_count || 0} hand(s) - confidence: ${d.confidence.toFixed(2)}`;
       const votesEl = document.getElementById('predVotes');
       votesEl.innerHTML = d.votes.map(v => `<span class="vote-chip">${v}</span>`).join('');
     } else {
       document.getElementById('predClass').textContent = '—';
-      document.getElementById('predConf').textContent = 'No hand detected';
+      document.getElementById('predConf').textContent =
+        d.hand_count ? `${d.hand_count} hand(s) detected - no matching samples` : 'No hand detected';
       document.getElementById('predVotes').innerHTML = '';
     }
   } catch (_) {}
@@ -495,22 +528,177 @@ function updateCaptureUI(count) {
   document.getElementById('commitBtn').disabled = count < 1;
 }
 
-async function captureGestureSample() {
-  const className = document.getElementById('gestureClassName').value.trim();
-  if (!className) return showToast('Enter a gesture class name first', true);
-  if (!camOn) return showToast('Start the camera first', true);
+function saveFormState() {
+  for (const id of formStateFields) {
+    const el = document.getElementById(id);
+    if (el) localStorage.setItem(`asl_${id}`, el.value);
+  }
+}
+
+function restoreFormState() {
+  for (const id of formStateFields) {
+    const el = document.getElementById(id);
+    const value = localStorage.getItem(`asl_${id}`);
+    if (el && value !== null) el.value = value;
+  }
+}
+
+function bindFormState() {
+  for (const id of formStateFields) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', saveFormState);
+      el.addEventListener('change', saveFormState);
+    }
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+function setClassOptions(classes = {}) {
+  currentClasses = classes || {};
+  const select = document.getElementById('deleteClassName');
+  const entries = Object.entries(currentClasses).sort((a, b) => a[0].localeCompare(b[0]));
+  if (!entries.length) {
+    select.innerHTML = '<option value="">No classes loaded</option>';
+    return;
+  }
+  select.innerHTML = entries
+    .map(([cls, count]) => `<option value="${escapeHtml(cls)}">${escapeHtml(cls)} (${count})</option>`)
+    .join('');
+}
+
+function updateRecordAvailability() {
+  const delay = parseInt(document.getElementById('captureDelay').value, 10) || 0;
+  const recordBtn = document.getElementById('recordBtn');
+  recordBtn.disabled = delay === 0;
+  recordBtn.title = delay === 0 ? 'Select 5 or 10 seconds delay before recording multiple samples.' : '';
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setCaptureBusy(isBusy) {
+  document.getElementById('captureBtn').disabled = isBusy;
+  document.getElementById('recordBtn').disabled =
+    isBusy || (parseInt(document.getElementById('captureDelay').value, 10) || 0) === 0;
+}
+
+async function waitForCaptureDelay(statusEl, label = 'Capturing') {
+  const delay = parseInt(document.getElementById('captureDelay').value, 10) || 0;
+  for (let remaining = delay; remaining > 0; remaining--) {
+    if (!camOn) {
+      statusEl.textContent = 'Capture cancelled because the camera stopped.';
+      return false;
+    }
+    statusEl.textContent = `${label} in ${remaining} second(s)...`;
+    await sleep(1000);
+  }
+  if (!camOn) {
+    statusEl.textContent = 'Capture cancelled because the camera stopped.';
+    return false;
+  }
+  return true;
+}
+
+async function requestCaptureSample(className) {
   const r = await fetch('/capture_sample', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({class_name: className}),
   });
   const d = await r.json();
-  if (d.ok) {
+  if (!d.ok) {
+    throw new Error(d.error || `Capture failed (${r.status})`);
+  }
+  return d;
+}
+
+function validateCaptureInputs() {
+  const className = document.getElementById('gestureClassName').value.trim();
+  if (!className) return showToast('Enter a gesture class name first', true);
+  if (!camOn) return showToast('Start the camera first', true);
+  return className;
+}
+
+async function captureGestureSample() {
+  const className = validateCaptureInputs();
+  if (!className) return;
+  const statusEl = document.getElementById('registerStatus');
+  setCaptureBusy(true);
+  try {
+    if (!await waitForCaptureDelay(statusEl, 'Capturing')) return;
+    statusEl.textContent = 'Capturing...';
+    const d = await requestCaptureSample(className);
     updateCaptureUI(d.count);
-    document.getElementById('registerStatus').textContent =
-      `${d.count} sample(s) captured for "${className}"`;
-  } else {
-    showToast(d.error, true);
+    statusEl.textContent =
+      `${d.count} sample(s) captured for "${className}" - ${d.hand_count} hand(s)`;
+  } catch (err) {
+    const msg = err.message || 'Capture request failed. Check that the Flask server is still running.';
+    statusEl.textContent = msg;
+    showToast(msg, true);
+  } finally {
+    setCaptureBusy(false);
+  }
+}
+
+async function recordGestureSamples() {
+  const className = validateCaptureInputs();
+  if (!className) return;
+  const statusEl = document.getElementById('registerStatus');
+  const delay = parseInt(document.getElementById('captureDelay').value, 10) || 0;
+  if (delay === 0) {
+    const msg = 'Select 5 or 10 seconds delay before recording multiple samples.';
+    statusEl.textContent = msg;
+    showToast(msg, true);
+    updateRecordAvailability();
+    return;
+  }
+  const target = parseInt(document.getElementById('autoSampleCount').value, 10) || 10;
+  setCaptureBusy(true);
+  try {
+    if (!await waitForCaptureDelay(statusEl, 'Recording')) return;
+
+    let okCount = 0;
+    let failCount = 0;
+    let lastResult = null;
+    for (let i = 1; i <= target; i++) {
+      if (!camOn) {
+        statusEl.textContent = `Recording cancelled. Captured ${okCount}/${target} sample(s).`;
+        return;
+      }
+      statusEl.textContent = `Recording ${i}/${target}... captured ${okCount}`;
+      try {
+        lastResult = await requestCaptureSample(className);
+        okCount++;
+        updateCaptureUI(lastResult.count);
+      } catch (_) {
+        failCount++;
+      }
+      if (i < target) await sleep(500);
+    }
+
+    const handText = lastResult ? ` - last frame: ${lastResult.hand_count} hand(s)` : '';
+    statusEl.textContent =
+      `Recorded ${okCount}/${target} sample(s) for "${className}"${handText}` +
+      (failCount ? `, skipped ${failCount}` : '');
+    if (okCount > 0) showToast(`Recorded ${okCount} sample(s)`);
+    else showToast('No samples captured. Keep both hands inside the frame.', true);
+  } catch (err) {
+    const msg = err.message || 'Recording failed. Check that the Flask server is still running.';
+    statusEl.textContent = msg;
+    showToast(msg, true);
+  } finally {
+    setCaptureBusy(false);
   }
 }
 
@@ -526,6 +714,8 @@ async function commitGesture() {
   if (d.ok) {
     updateCaptureUI(0);
     document.getElementById('samplesCount').textContent = d.total_samples;
+    setClassOptions(d.classes);
+    saveFormState();
     document.getElementById('registerStatus').textContent =
       `Added ${d.added} sample(s) — total ${d.total_samples} in model.`;
     showToast(`"${className}" registered with ${d.added} samples`);
@@ -541,10 +731,63 @@ async function clearPending() {
 }
 
 async function saveTraining() {
-  const r = await fetch('/save_training', {method: 'POST'});
-  const d = await r.json();
-  if (d.ok) showToast(`Saved to ${d.path}`);
-  else showToast(d.error, true);
+  const statusEl = document.getElementById('registerStatus');
+  const path = document.getElementById('trainingPath').value.trim();
+  statusEl.textContent = 'Saving training data...';
+  try {
+    const r = await fetch('/save_training', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (d.samples !== undefined) document.getElementById('samplesCount').textContent = d.samples;
+      if (d.classes) setClassOptions(d.classes);
+      if (d.path) document.getElementById('trainingPath').value = d.path;
+      saveFormState();
+      statusEl.textContent = `Saved ${d.samples} sample(s) to ${d.path}`;
+      showToast(`Saved to ${d.path}`);
+    } else {
+      statusEl.textContent = d.error;
+      showToast(d.error, true);
+    }
+  } catch (_) {
+    const msg = 'Save failed. Check that the Flask server is still running.';
+    statusEl.textContent = msg;
+    showToast(msg, true);
+  }
+}
+
+async function deleteGestureClass() {
+  const className = document.getElementById('deleteClassName').value;
+  const statusEl = document.getElementById('registerStatus');
+  if (!className) return showToast('Select a gesture class to delete', true);
+  if (!confirm(`Delete all samples for "${className}"? Save to disk after this to persist the change.`)) return;
+
+  try {
+    const r = await fetch('/delete_gesture', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({class_name: className}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('samplesCount').textContent = d.total_samples;
+      updateCaptureUI(0);
+      setClassOptions(d.classes);
+      statusEl.textContent =
+        `Deleted ${d.removed} sample(s) for "${className}". Click Save to disk to persist.`;
+      showToast(`Deleted "${className}"`);
+    } else {
+      statusEl.textContent = d.error;
+      showToast(d.error, true);
+    }
+  } catch (_) {
+    const msg = 'Delete failed. Check that the Flask server is still running.';
+    statusEl.textContent = msg;
+    showToast(msg, true);
+  }
 }
 
 // ── Eval stats ────────────────────────────────────────────────────────────────
@@ -586,14 +829,18 @@ async function loadStats() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async () => {
+  bindFormState();
   const r = await fetch('/status');
   const d = await r.json();
   if (d.training_loaded) {
     setTrainingLoaded(d.training_samples);
+    setClassOptions(d.classes);
     if (d.training_path) document.getElementById('trainingPath').value = d.training_path;
   }
   document.getElementById('kVal').value = d.k;
   document.getElementById('metricVal').value = d.metric;
+  restoreFormState();
+  updateRecordAvailability();
 })();
 </script>
 </body>
