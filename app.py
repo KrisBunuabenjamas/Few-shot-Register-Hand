@@ -19,6 +19,9 @@ from flask import Flask, Response, jsonify, render_template, request
 
 app = Flask(__name__)
 
+DEFAULT_K = 3
+DEFAULT_METRIC = "euclidean"
+
 # Global state
 state = {
     "training_data": None,
@@ -31,8 +34,8 @@ state = {
         "hand_count": 0,
         "feature_type": None,
     },
-    "k": 3,
-    "metric": "euclidean",
+    "k": DEFAULT_K,
+    "metric": DEFAULT_METRIC,
     "latest_landmarks": None,
     "latest_landmarks_at": 0.0,
     "pending_samples": [],
@@ -352,13 +355,10 @@ def upload_training():
 
 @app.route("/settings", methods=["POST"])
 def settings():
-    data = request.get_json()
     with state_lock:
-        if "k" in data:
-            state["k"] = int(data["k"])
-        if "metric" in data:
-            state["metric"] = data["metric"]
-    return jsonify({"ok": True})
+        state["k"] = DEFAULT_K
+        state["metric"] = DEFAULT_METRIC
+    return jsonify({"ok": True, "k": DEFAULT_K, "metric": DEFAULT_METRIC})
 
 
 @app.route("/stop_camera", methods=["POST"])

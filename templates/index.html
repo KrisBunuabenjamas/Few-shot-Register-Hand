@@ -289,27 +289,6 @@
       </div>
     </div>
 
-    <!-- KNN settings -->
-    <div class="card">
-      <h2>KNN Settings</h2>
-      <div class="row">
-        <div>
-          <label>K</label>
-          <input type="number" id="kVal" value="3" min="1" max="20" />
-        </div>
-        <div>
-          <label>Metric</label>
-          <select id="metricVal">
-            <option value="euclidean">Euclidean</option>
-            <option value="cosine">Cosine</option>
-            <option value="manhattan">Manhattan</option>
-            <option value="mse">MSE</option>
-          </select>
-        </div>
-      </div>
-      <button type="button" style="margin-top:8px" onclick="applySettings()">Apply</button>
-    </div>
-
     <!-- Register Gesture -->
     <div class="card">
       <h2>Register New Gesture</h2>
@@ -389,7 +368,7 @@
 let camOn = false;
 let pollTimer = null;
 let currentClasses = {};
-const formStateFields = ['trainingPath', 'gestureClassName', 'captureDelay', 'autoSampleCount', 'kVal', 'metricVal'];
+const formStateFields = ['trainingPath', 'gestureClassName', 'captureDelay', 'autoSampleCount'];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function showToast(msg, isErr = false) {
@@ -448,18 +427,6 @@ function setTrainingLoaded(n) {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
-async function applySettings() {
-  const k = parseInt(document.getElementById('kVal').value);
-  const metric = document.getElementById('metricVal').value;
-  await fetch('/settings', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({k, metric}),
-  });
-  saveFormState();
-  showToast(`K=${k}, metric=${metric}`);
-}
-
 // ── Camera ────────────────────────────────────────────────────────────────────
 function toggleCamera() {
   if (camOn) stopCamera();
@@ -837,8 +804,6 @@ async function loadStats() {
     setClassOptions(d.classes);
     if (d.training_path) document.getElementById('trainingPath').value = d.training_path;
   }
-  document.getElementById('kVal').value = d.k;
-  document.getElementById('metricVal').value = d.metric;
   restoreFormState();
   updateRecordAvailability();
 })();
