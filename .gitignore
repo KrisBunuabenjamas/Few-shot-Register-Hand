@@ -50,3 +50,12 @@ desktop.ini
 *.h5
 *.model
 *.weights
+
+
+.env
+.env.*
+.claude/
+.clade/
+python
+__pycache__/
+*.pyc
